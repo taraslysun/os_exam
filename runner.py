@@ -1,7 +1,7 @@
 import subprocess
 import os
 import argparse
-
+import time
 def create_config_file(mode, num_processes, shared_mem_name=None, ip_addresses=None):
     with open("config.txt", "w") as f:
         f.write(f"{mode}\n")
@@ -15,6 +15,7 @@ def create_config_file(mode, num_processes, shared_mem_name=None, ip_addresses=N
 def launch_processes(exe, num_processes, config_file):
     processes = []
     for rank in range(num_processes):
+        time.sleep(1)
         cmd = [exe, str(rank), config_file]
         proc = subprocess.Popen(cmd)
         processes.append(proc)

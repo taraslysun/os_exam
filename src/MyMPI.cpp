@@ -1,6 +1,6 @@
 #include "MyMPI.hpp"
 
-MyMPI::MyMPI(int argc, char* argv[]) : resolver(io_context) {
+MyMPI::MyMPI(int argc, char* argv[])  {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <rank> <config_file>" << std::endl;
         exit(1);
@@ -13,7 +13,7 @@ MyMPI::MyMPI(int argc, char* argv[]) : resolver(io_context) {
 
     use_shared_memory = cfg["mode"] == "0";
     world_size = std::stoi(cfg["process_count"]);
-
+    port = PORT + rank;
     setup_communication();
 }
 
@@ -58,43 +58,9 @@ void MyMPI::setup_shared_memory() {
 }
 
 void MyMPI::setup_sockets() {
-    try {
-        for (int i = 0; i < world_size; ++i) {
-            std::string ip_key = "ip_address_" + std::to_string(i);
-            peers.push_back(cfg[ip_key]);
-        }
-        port = std::stoi(cfg["port_base"]); // Get base port from config
-
-        acceptor = std::make_shared<ba::ip::tcp::acceptor>(io_context);
-        ba::ip::tcp::endpoint endpoint(ba::ip::tcp::v4(), port + rank);
-        acceptor->open(endpoint.protocol());
-        acceptor->set_option(ba::ip::tcp::acceptor::reuse_address(true));
-        acceptor->bind(endpoint);
-        acceptor->listen();
-
-        start_accept();
-
-        io_thread = std::thread([this]() {
-            io_context.run();
-        });
-    } catch (const std::exception& e) {
-        std::cerr << "Error setting up sockets: " << e.what() << std::endl;
-        exit(1);
-    }
 }
 
 
-void MyMPI::start_accept() {
-    auto socket = std::make_shared<ba::ip::tcp::socket>(io_context);
-    acceptor->async_accept(*socket, [this, socket](boost::system::error_code ec) {
-        if (!ec) {
-            asyncRead(socket, nullptr);
-        } else {
-            std::cerr << "Error accepting connection: " << ec.message() << std::endl;
-        }
-        start_accept(); // Continue accepting connections
-    });
-}
 
 size_t MyMPI::calculate_offset(int sender_rank, int receiver_rank) {
     return (sender_rank * world_size + receiver_rank) * max_message_size;

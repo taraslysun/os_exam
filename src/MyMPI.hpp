@@ -6,7 +6,7 @@
 #include <boost/interprocess/sync/named_semaphore.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/process.hpp>
-
+#define PORT 8000
 #include <iostream>
 
 namespace bip = boost::interprocess;
@@ -29,9 +29,9 @@ private:
 
     std::string hostname;
     int port;
-
     ba::io_context io_context;
-    ba::ip::tcp::resolver resolver;
+
+    std::thread io_thread;
 
     void setup_communication();
     void setup_shared_memory();
@@ -49,8 +49,9 @@ public:
     bool test(int request_id);
     void wait(int request_id);
 
+
     template <typename T>
-    void send(int dest_rank, const T* data, size_t count) {
+    void send(int dest_rank, const T* data, size_t count, std::string dest_hostname = "") {
         if (use_shared_memory) {
             char* shm_data = static_cast<char*>(region.get_address());
             size_t offset = calculate_offset(rank, dest_rank);
@@ -60,11 +61,21 @@ public:
             bip::named_semaphore sem(bip::open_or_create, sem_name.c_str(), 0);
             sem.post();
         }
+        else {
+            std::cout << "Sending to " << dest_hostname << ' ' << dest_rank << std::endl;
+            ba::ip::tcp::socket socket(io_context);
+            ba::ip::tcp::resolver resolver(io_context);
+            ba::connect(socket, resolver.resolve(dest_hostname, std::to_string(PORT + dest_rank)));
+            ba::write(socket, ba::buffer(data, sizeof(T) * count));
+
+        }
+        
     }
 
     template <typename T>
     void recv(int src_rank, T* buffer, size_t count) {
         if (use_shared_memory) {
+
             std::string sem_name = "sem_" + std::to_string(src_rank) + "_to_" + std::to_string(rank);
             bip::named_semaphore sem(bip::open_or_create, sem_name.c_str(), 0);
             sem.wait();
@@ -75,48 +86,12 @@ public:
 
             bip::named_semaphore::remove(sem_name.c_str());
         }
-        
-        
+        else {
+            ba::ip::tcp::acceptor acceptor(io_context, ba::ip::tcp::endpoint(ba::ip::tcp::v4(), port));
+            ba::ip::tcp::socket socket = acceptor.accept();
+            std::cout << "Receiving from " << socket.remote_endpoint().address().to_string() << ' ' << src_rank << std::endl;
+            ba::read(socket, ba::buffer(buffer, sizeof(T) * count));
+        }
     }
-
-
-    void asyncWrite(
-        std::shared_ptr<boost::asio::ip::tcp::socket> socket,
-        std::shared_ptr<std::string> message,
-        std::shared_ptr<std::ofstream> output_file) {
-        boost::asio::async_write(
-            *socket, boost::asio::buffer(*message),
-            [this, socket, message, output_file](boost::system::error_code ec, std::size_t bytes_transferred) {
-                if (!ec) {
-                    asyncRead(socket, output_file);
-                } else {
-                    std::cerr << "Error writing: " << ec.message() << std::endl;
-                }
-            });
-    }
-
-    void asyncRead(
-        std::shared_ptr<boost::asio::ip::tcp::socket> socket,
-        std::shared_ptr<std::ofstream> output_file) {
-        auto buffer = std::make_shared<std::array<char, 1500>>();
-        socket->async_read_some(
-            boost::asio::buffer(*buffer),
-            [this, socket, buffer, output_file](boost::system::error_code ec, std::size_t bytes_transferred) {
-                if (!ec) {
-                    output_file->write(buffer->data(), bytes_transferred);
-                    asyncRead(socket, output_file);
-                } else if (ec == boost::asio::error::eof) {
-                    output_file->close();
-                } else {
-                    std::cerr << "Error reading: " << ec.message() << std::endl;
-                }
-            });
-    }
-
 
 };
-
-
-
-
-void MPIInit(int argc, char* argv[]);
